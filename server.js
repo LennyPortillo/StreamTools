@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const multer = require("multer");
 const { Server } = require("socket.io");
 const { v4: uuidv4 } = require("uuid");
@@ -11,6 +12,15 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET || "cambiar-esto";
 const PUBLIC_URL = (process.env.PUBLIC_URL || `http://localhost:${PORT}`).replace(/\/$/, "");
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const DATA_FILE = path.join(__dirname, "data.json");
+
+const MAX_ITEMS = 80;
+const MAX_TOKENS = 25;
+const MAX_NAME_LEN = 24;
+const SESSION_MS = 8 * 60 * 60 * 1000;
+const ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+
+const adminSessions = new Map();
+const rateBuckets = new Map();
 
 if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
@@ -28,45 +38,239 @@ function saveData(data) {
 
 let state = loadData();
 
+function timingSafeEqual(a, b) {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const ba = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ba.length !== bb.length) {
+    crypto.timingSafeEqual(ba, ba);
+    return false;
+  }
+  return crypto.timingSafeEqual(ba, bb);
+}
+
+function getCookie(req, name) {
+  const raw = req.headers.cookie || "";
+  const match = raw.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function setSessionCookie(res, sessionId) {
+  const secure = PUBLIC_URL.startsWith("https");
+  res.setHeader(
+    "Set-Cookie",
+    `admin_session=${sessionId}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MS / 1000}${secure ? "; Secure" : ""}`
+  );
+}
+
+function clearSessionCookie(res) {
+  res.setHeader("Set-Cookie", "admin_session=; Path=/; HttpOnly; Max-Age=0; SameSite=Strict");
+}
+
+function createSession() {
+  const id = crypto.randomBytes(32).toString("hex");
+  adminSessions.set(id, Date.now() + SESSION_MS);
+  return id;
+}
+
+function isValidSession(id) {
+  if (!id || !adminSessions.has(id)) return false;
+  if (Date.now() > adminSessions.get(id)) {
+    adminSessions.delete(id);
+    return false;
+  }
+  return true;
+}
+
+function rateLimit(scope, max, windowMs) {
+  return (req, res, next) => {
+    const ip = req.ip || req.socket.remoteAddress || "unknown";
+    const key = `${scope}:${ip}`;
+    const now = Date.now();
+    let bucket = rateBuckets.get(key);
+    if (!bucket || now > bucket.until) {
+      bucket = { count: 0, until: now + windowMs };
+      rateBuckets.set(key, bucket);
+    }
+    bucket.count += 1;
+    if (bucket.count > max) {
+      return res.status(429).json({ error: "Demasiados intentos. Esperá un momento." });
+    }
+    next();
+  };
+}
+
+function requireAdmin(req, res, next) {
+  const session = getCookie(req, "admin_session");
+  if (!isValidSession(session)) {
+    return res.status(401).json({ error: "Sesión inválida o expirada" });
+  }
+  next();
+}
+
+function isValidToken(token) {
+  return typeof token === "string" && state.editorTokens.includes(token);
+}
+
+function sanitizeName(raw) {
+  return String(raw || "Anónimo")
+    .replace(/[<>"'&]/g, "")
+    .trim()
+    .slice(0, MAX_NAME_LEN) || "Anónimo";
+}
+
+function clampNum(val, min, max) {
+  const n = Number(val);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(max, Math.max(min, n));
+}
+
+function safeUploadPath(filename) {
+  const base = path.basename(filename);
+  if (!base || base.includes("..")) return null;
+  const root = path.resolve(UPLOADS_DIR);
+  const resolved = path.resolve(UPLOADS_DIR, base);
+  if (resolved !== root && !resolved.startsWith(root + path.sep)) return null;
+  return resolved;
+}
+
+function isRealImage(buffer) {
+  if (!buffer || buffer.length < 12) return false;
+  if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return true;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return true;
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) return true;
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") return true;
+  return false;
+}
+
+function extFromMime(mime) {
+  const map = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/gif": ".gif",
+    "image/webp": ".webp",
+  };
+  return map[mime] || ".png";
+}
+
 const storage = multer.diskStorage({
   destination: UPLOADS_DIR,
   filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname) || ".png";
+    const ext = extFromMime(file.mimetype);
     cb(null, `${uuidv4()}${ext}`);
   },
 });
+
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) cb(null, true);
-    else cb(new Error("Solo imágenes"));
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (!file.mimetype.startsWith("image/") || (ext && !ALLOWED_EXT.has(ext))) {
+      return cb(new Error("Formato no permitido"));
+    }
+    cb(null, true);
   },
 });
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { maxHttpBufferSize: 1e6 });
 
-app.use(express.json());
-app.use("/uploads", express.static(UPLOADS_DIR));
+app.set("trust proxy", 1);
+app.use(express.json({ limit: "32kb" }));
+
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "SAMEORIGIN");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+  next();
+});
+
+app.use("/uploads", express.static(UPLOADS_DIR, { dotfiles: "deny", index: false }));
 app.use(express.static(path.join(__dirname, "public")));
 
-function isValidToken(token) {
-  return state.editorTokens.includes(token);
-}
-
-app.get("/", (_req, res) => {
-  res.redirect("/admin.html");
-});
+app.get("/", (_req, res) => res.redirect("/admin.html"));
 
 app.get("/api/state", (_req, res) => {
   res.json(state.items);
 });
 
-app.post("/api/upload", upload.single("image"), (req, res) => {
-  const token = req.body.token;
+app.post("/api/admin/login", rateLimit("login", 8, 15 * 60 * 1000), (req, res) => {
+  const secret = req.body?.secret;
+  if (!secret || !timingSafeEqual(secret, ADMIN_SECRET)) {
+    return res.status(401).json({ error: "Clave incorrecta" });
+  }
+  const sessionId = createSession();
+  setSessionCookie(res, sessionId);
+  res.json({ ok: true });
+});
+
+app.post("/api/admin/logout", (req, res) => {
+  const session = getCookie(req, "admin_session");
+  if (session) adminSessions.delete(session);
+  clearSessionCookie(res);
+  res.json({ ok: true });
+});
+
+app.get("/api/admin/session", (req, res) => {
+  const session = getCookie(req, "admin_session");
+  res.json({ ok: isValidSession(session) });
+});
+
+app.get("/api/admin/tokens", requireAdmin, (_req, res) => {
+  res.json({
+    tokens: state.editorTokens,
+    overlayUrl: `${PUBLIC_URL}/overlay.html`,
+    itemCount: state.items.length,
+  });
+});
+
+app.post("/api/admin/tokens", requireAdmin, (_req, res) => {
+  if (state.editorTokens.length >= MAX_TOKENS) {
+    return res.status(400).json({ error: `Máximo ${MAX_TOKENS} links activos` });
+  }
+  const token = crypto.randomBytes(16).toString("hex");
+  state.editorTokens.push(token);
+  saveData(state);
+  res.json({ token, url: `${PUBLIC_URL}/editor.html?token=${token}` });
+});
+
+app.delete("/api/admin/tokens/:token", requireAdmin, (req, res) => {
+  const idx = state.editorTokens.indexOf(req.params.token);
+  if (idx === -1) return res.status(404).json({ error: "Token no encontrado" });
+  state.editorTokens.splice(idx, 1);
+  saveData(state);
+  res.json({ ok: true });
+});
+
+app.delete("/api/admin/clear", requireAdmin, (_req, res) => {
+  for (const item of state.items) {
+    const filePath = safeUploadPath(path.basename(item.url));
+    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  }
+  state.items = [];
+  saveData(state);
+  io.emit("state", state.items);
+  res.json({ ok: true });
+});
+
+app.post("/api/upload", rateLimit("upload", 30, 60 * 1000), upload.single("image"), (req, res) => {
+  const token = req.body?.token;
   if (!isValidToken(token)) return res.status(403).json({ error: "Token inválido" });
+
+  if (!req.file) return res.status(400).json({ error: "Sin archivo" });
+  if (state.items.length >= MAX_ITEMS) return res.status(400).json({ error: "Overlay lleno" });
+
+  const filePath = safeUploadPath(req.file.filename);
+  if (!filePath) return res.status(400).json({ error: "Archivo inválido" });
+
+  const buf = fs.readFileSync(filePath);
+  if (!isRealImage(buf)) {
+    fs.unlinkSync(filePath);
+    return res.status(400).json({ error: "No es una imagen válida" });
+  }
 
   const item = {
     id: uuidv4(),
@@ -76,7 +280,7 @@ app.post("/api/upload", upload.single("image"), (req, res) => {
     width: 300,
     height: 300,
     rotation: 0,
-    author: req.body.name || "Anónimo",
+    author: sanitizeName(req.body.name),
     createdAt: Date.now(),
   };
 
@@ -86,35 +290,54 @@ app.post("/api/upload", upload.single("image"), (req, res) => {
   res.json(item);
 });
 
-app.put("/api/items/:id", (req, res) => {
-  const token = req.body.token;
+app.put("/api/items/:id", rateLimit("edit", 120, 60 * 1000), (req, res) => {
+  const token = req.body?.token;
   if (!isValidToken(token)) return res.status(403).json({ error: "Token inválido" });
 
   const idx = state.items.findIndex((i) => i.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: "No encontrado" });
 
   const { x, y, width, height, rotation } = req.body;
-  if (x !== undefined) state.items[idx].x = x;
-  if (y !== undefined) state.items[idx].y = y;
-  if (width !== undefined) state.items[idx].width = width;
-  if (height !== undefined) state.items[idx].height = height;
-  if (rotation !== undefined) state.items[idx].rotation = rotation;
+  if (x !== undefined) {
+    const v = clampNum(x, -500, 2500);
+    if (v === null) return res.status(400).json({ error: "Coordenada inválida" });
+    state.items[idx].x = v;
+  }
+  if (y !== undefined) {
+    const v = clampNum(y, -500, 1500);
+    if (v === null) return res.status(400).json({ error: "Coordenada inválida" });
+    state.items[idx].y = v;
+  }
+  if (width !== undefined) {
+    const v = clampNum(width, 20, 1920);
+    if (v === null) return res.status(400).json({ error: "Tamaño inválido" });
+    state.items[idx].width = v;
+  }
+  if (height !== undefined) {
+    const v = clampNum(height, 20, 1080);
+    if (v === null) return res.status(400).json({ error: "Tamaño inválido" });
+    state.items[idx].height = v;
+  }
+  if (rotation !== undefined) {
+    const v = clampNum(rotation, -360, 360);
+    if (v === null) return res.status(400).json({ error: "Rotación inválida" });
+    state.items[idx].rotation = v;
+  }
 
   saveData(state);
   io.emit("state", state.items);
   res.json(state.items[idx]);
 });
 
-app.delete("/api/items/:id", (req, res) => {
+app.delete("/api/items/:id", rateLimit("delete", 60, 60 * 1000), (req, res) => {
   const token = req.query.token;
   if (!isValidToken(token)) return res.status(403).json({ error: "Token inválido" });
 
   const idx = state.items.findIndex((i) => i.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: "No encontrado" });
 
-  const item = state.items[idx];
-  const filePath = path.join(__dirname, item.url);
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  const filePath = safeUploadPath(path.basename(state.items[idx].url));
+  if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
   state.items.splice(idx, 1);
   saveData(state);
@@ -122,35 +345,12 @@ app.delete("/api/items/:id", (req, res) => {
   res.json({ ok: true });
 });
 
-app.post("/api/admin/tokens", (req, res) => {
-  if (req.body.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Secret incorrecto" });
-
-  const token = uuidv4().slice(0, 8);
-  state.editorTokens.push(token);
-  saveData(state);
-  res.json({ token, url: `${PUBLIC_URL}/editor.html?token=${token}` });
-});
-
-app.get("/api/admin/tokens", (req, res) => {
-  if (req.query.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Secret incorrecto" });
-  res.json({
-    tokens: state.editorTokens,
-    overlayUrl: `${PUBLIC_URL}/overlay.html`,
-    itemCount: state.items.length,
-  });
-});
-
-app.delete("/api/admin/clear", (req, res) => {
-  if (req.body.secret !== ADMIN_SECRET) return res.status(403).json({ error: "Secret incorrecto" });
-
-  for (const item of state.items) {
-    const filePath = path.join(__dirname, item.url);
-    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+app.use((err, _req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({ error: err.code === "LIMIT_FILE_SIZE" ? "Archivo muy grande (máx 8MB)" : "Upload inválido" });
   }
-  state.items = [];
-  saveData(state);
-  io.emit("state", state.items);
-  res.json({ ok: true });
+  if (err) return res.status(400).json({ error: err.message || "Error" });
+  next();
 });
 
 io.on("connection", (socket) => {
@@ -158,9 +358,10 @@ io.on("connection", (socket) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`\n  PENMA Overlay → ${PUBLIC_URL}`);
-  console.log(`  OBS Browser Source → ${PUBLIC_URL}/overlay.html`);
-  console.log(`  Admin → ${PUBLIC_URL}/admin.html`);
-  console.log(`  (local) → http://localhost:${PORT}`);
-  console.log(`  ADMIN_SECRET: ${ADMIN_SECRET}\n`);
+  console.log(`\n  StreamTools → ${PUBLIC_URL}`);
+  console.log(`  OBS overlay → ${PUBLIC_URL}/overlay.html`);
+  console.log(`  Admin       → ${PUBLIC_URL}/admin.html\n`);
+  if (ADMIN_SECRET === "cambiar-esto") {
+    console.warn("  ⚠️  ADMIN_SECRET por defecto. Cambialo antes de abrir el túnel.\n");
+  }
 });

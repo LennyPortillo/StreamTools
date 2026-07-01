@@ -7,96 +7,62 @@
   <link rel="stylesheet" href="/css/theme.css">
 </head>
 <body>
-  <div class="app admin-wrap">
-    <header class="admin-hero">
+  <div class="app admin-page">
+    <header class="admin-header">
       <div class="brand">
-        <div class="brand-mark">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="2" y="3" width="20" height="14" rx="2"/>
-            <path d="M8 21h8M12 17v4"/>
-          </svg>
-        </div>
+        <div class="brand-icon">▶</div>
         <div>
           <h1>StreamTools</h1>
-          <span>Panel del streamer</span>
+          <span>Panel de control</span>
         </div>
       </div>
-      <p>Gestioná el overlay, generá enlaces para viewers y configurá OBS.</p>
+      <p>Configurá OBS, generá links para viewers y gestioná el overlay.</p>
     </header>
 
-    <div class="admin-stack">
-      <section class="card">
-        <div class="card-header">
-          <div class="step-num">1</div>
-          <div>
-            <h2>Acceso admin</h2>
-            <p>Solo vos tenés esta clave. No la compartas en el chat.</p>
-          </div>
+    <div class="section-label">Acceso</div>
+    <div class="card">
+      <p class="card-desc">Ingresá tu clave de administrador.</p>
+      <div class="login-form">
+        <input class="input" type="password" id="secret" placeholder="ADMIN_SECRET">
+        <button class="btn btn-primary" id="btn-login">Entrar</button>
+      </div>
+    </div>
+
+    <div id="panel" style="display:none">
+      <div class="admin-stats">
+        <span><strong id="stat-items">0</strong> imágenes</span>
+        <span><strong id="stat-tokens">0</strong> links activos</span>
+      </div>
+
+      <div class="section-label">OBS</div>
+      <div class="card">
+        <p class="card-title">Browser Source</p>
+        <p class="card-desc">Fuente Navegador · 1920×1080 · fondo transparente</p>
+        <ul class="obs-specs">
+          <li><span class="label">URL</span> <code id="obs-url">—</code></li>
+          <li><span class="label">CSS</span> <code class="code-inline">body { background-color: rgba(0,0,0,0); }</code></li>
+        </ul>
+        <div class="copy-field" id="copy-overlay">
+          <code>—</code>
+          <span class="copy-label">Copiar</span>
         </div>
-        <div class="login-row">
-          <input class="input" type="password" id="secret" placeholder="Tu ADMIN_SECRET">
-          <button class="btn btn-primary" id="btn-login">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
-            Entrar
-          </button>
+      </div>
+
+      <div class="section-label">Viewers</div>
+      <div class="card">
+        <p class="card-title">Enlaces de editor</p>
+        <p class="card-desc">Mandá el link por DM. Solo quien lo tenga puede editar.</p>
+        <button class="btn btn-primary" id="btn-new-token">Generar link</button>
+        <ul class="link-list" id="token-list"></ul>
+      </div>
+
+      <div class="section-label">Mantenimiento</div>
+      <div class="card">
+        <p class="card-desc">Elimina todas las imágenes del overlay.</p>
+        <div class="card-actions" style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-danger" id="btn-clear">Limpiar overlay</button>
+          <button class="btn btn-secondary" id="btn-logout">Cerrar sesión</button>
         </div>
-      </section>
-
-      <div id="panel" style="display:none" class="admin-stack">
-        <div class="stats-row">
-          <div class="stat-pill">Imágenes en overlay: <strong id="stat-items">0</strong></div>
-          <div class="stat-pill">Enlaces activos: <strong id="stat-tokens">0</strong></div>
-        </div>
-
-        <section class="card">
-          <div class="card-header">
-            <div class="step-num">2</div>
-            <div>
-              <h2>OBS — Browser Source</h2>
-              <p>Agregá esta URL como fuente Navegador en OBS.</p>
-            </div>
-          </div>
-          <ul class="obs-list">
-            <li><strong>URL</strong> <code id="obs-url">—</code></li>
-            <li><strong>Tamaño</strong> 1920 × 1080 px</li>
-            <li><strong>CSS personalizado</strong> <code class="inline-code">body { background-color: rgba(0,0,0,0); }</code></li>
-          </ul>
-          <div class="copy-box" id="copy-overlay" title="Click para copiar">
-            <code>—</code>
-            <svg class="copy-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </div>
-        </section>
-
-        <section class="card">
-          <div class="card-header">
-            <div class="step-num">3</div>
-            <div>
-              <h2>Invitar viewers</h2>
-              <p>Generá un enlace y mandalo por DM. Solo quien lo tenga puede editar.</p>
-            </div>
-          </div>
-          <button class="btn btn-primary" id="btn-new-token">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
-            Generar enlace de editor
-          </button>
-          <ul class="token-list" id="token-list"></ul>
-        </section>
-
-        <section class="card">
-          <div class="card-header">
-            <div class="step-num">4</div>
-            <div>
-              <h2>Limpiar overlay</h2>
-              <p>Borrá todas las imágenes del canvas de una vez.</p>
-            </div>
-          </div>
-          <div class="card-actions">
-            <button class="btn btn-danger" id="btn-clear">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-              Limpiar todo
-            </button>
-          </div>
-        </section>
       </div>
     </div>
   </div>
@@ -104,34 +70,69 @@
   <script>
     const secretInput = document.getElementById("secret");
     const panel = document.getElementById("panel");
-    let secret = localStorage.getItem("admin-secret") || "";
+    const fetchOpts = { credentials: "same-origin" };
 
-    if (secret) { secretInput.value = secret; load(); }
+    secretInput.addEventListener("keydown", e => {
+      if (e.key === "Enter") document.getElementById("btn-login").click();
+    });
 
-    secretInput.addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("btn-login").click(); });
+    async function api(url, opts = {}) {
+      const res = await fetch(url, { ...fetchOpts, ...opts });
+      if (res.status === 401) {
+        panel.style.display = "none";
+        throw new Error("auth");
+      }
+      return res;
+    }
 
-    document.getElementById("btn-login").addEventListener("click", () => {
-      secret = secretInput.value;
-      localStorage.setItem("admin-secret", secret);
-      load();
+    async function trySession() {
+      try {
+        const res = await api("/api/admin/session");
+        const data = await res.json();
+        if (data.ok) await load();
+      } catch { /* no session */ }
+    }
+
+    document.getElementById("btn-login").addEventListener("click", async () => {
+      const secret = secretInput.value;
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ secret }),
+      });
+      if (!res.ok) {
+        alert("Clave incorrecta");
+        return;
+      }
+      secretInput.value = "";
+      await load();
+    });
+
+    document.getElementById("btn-logout").addEventListener("click", async () => {
+      await fetch("/api/admin/logout", { method: "POST", credentials: "same-origin" });
+      panel.style.display = "none";
     });
 
     function copy(text, el) {
       navigator.clipboard.writeText(text);
-      const existing = el.querySelector(".copied-toast");
-      if (existing) existing.remove();
-      const msg = document.createElement("span");
-      msg.className = "copied-toast";
-      msg.textContent = "Copiado";
-      el.appendChild(msg);
-      setTimeout(() => msg.remove(), 1800);
+      el.classList.add("copied");
+      el.querySelector(".copy-label").textContent = "Copiado";
+      setTimeout(() => {
+        el.classList.remove("copied");
+        el.querySelector(".copy-label").textContent = "Copiar";
+      }, 1800);
+    }
+
+    function shortToken(t) {
+      return t.length > 10 ? t.slice(0, 8) + "…" : t;
     }
 
     async function load() {
-      const res = await fetch(`/api/admin/tokens?secret=${encodeURIComponent(secret)}`);
-      if (!res.ok) { alert("Secret incorrecto"); return; }
+      const res = await api("/api/admin/tokens");
+      if (!res.ok) return;
       const data = await res.json();
-      panel.style.display = "flex";
+      panel.style.display = "block";
 
       document.getElementById("stat-items").textContent = data.itemCount;
       document.getElementById("stat-tokens").textContent = data.tokens.length;
@@ -144,44 +145,56 @@
 
       const list = document.getElementById("token-list");
       if (!data.tokens.length) {
-        list.innerHTML = '<li class="empty-tokens">Todavía no hay enlaces. Generá uno para invitar viewers.</li>';
+        list.innerHTML = '<li class="empty-msg">Todavía no hay links generados.</li>';
         return;
       }
 
       list.innerHTML = data.tokens.map(t => {
         const url = `${location.origin}/editor.html?token=${t}`;
-        return `<li class="token-item">
-          <span class="token-chip">${t}</span>
-          <div class="copy-box" data-url="${url}">
+        return `<li class="link-row">
+          <span class="token" title="${t}">${shortToken(t)}</span>
+          <div class="copy-field" data-url="${url}">
             <code>${url}</code>
-            <svg class="copy-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <span class="copy-label">Copiar</span>
           </div>
+          <button class="btn btn-secondary btn-revoke" data-token="${t}" type="button" title="Revocar">✕</button>
         </li>`;
       }).join("");
 
-      list.querySelectorAll(".copy-box").forEach(el => {
+      list.querySelectorAll(".copy-field").forEach(el => {
         el.onclick = () => copy(el.dataset.url, el);
+      });
+
+      list.querySelectorAll(".btn-revoke").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("¿Revocar este link? Quien lo tenga dejará de poder editar.")) return;
+          await api(`/api/admin/tokens/${btn.dataset.token}`, { method: "DELETE" });
+          load();
+        });
       });
     }
 
     document.getElementById("btn-new-token").addEventListener("click", async () => {
-      await fetch("/api/admin/tokens", {
+      const res = await api("/api/admin/tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ secret }),
+        body: "{}",
       });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || "Error");
+        return;
+      }
       load();
     });
 
     document.getElementById("btn-clear").addEventListener("click", async () => {
-      if (!confirm("¿Borrar todas las imágenes del overlay?")) return;
-      await fetch("/api/admin/clear", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ secret }),
-      });
+      if (!confirm("¿Borrar todas las imágenes?")) return;
+      await api("/api/admin/clear", { method: "DELETE" });
       load();
     });
+
+    trySession();
   </script>
 </body>
 </html>

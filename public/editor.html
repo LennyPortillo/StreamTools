@@ -7,52 +7,38 @@
   <link rel="stylesheet" href="/css/theme.css">
 </head>
 <body>
-  <div class="editor-shell" id="app">
-    <header class="editor-top">
-      <div class="editor-top-inner">
-        <div class="brand">
-          <div class="brand-mark">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
-            </svg>
-          </div>
-          <div>
-            <h1>Editor Overlay</h1>
-            <span id="author-badge">Conectando…</span>
-          </div>
-        </div>
-
-        <span class="pill pill-live" id="status-pill"><span class="dot"></span> En vivo</span>
-
-        <div class="editor-controls">
-          <input class="input" id="name-input" placeholder="Tu nombre" maxlength="20">
-          <label class="btn btn-primary">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
-            Subir imagen
-            <input type="file" id="file-input" accept="image/*" multiple>
-          </label>
-          <button class="btn btn-ghost" id="btn-clear-sel" type="button">Deseleccionar</button>
+  <div class="editor-page" id="app">
+    <div class="editor-bar">
+      <div class="brand">
+        <div class="brand-icon">✎</div>
+        <div>
+          <h1>Editor</h1>
+          <span id="author-badge">Conectando…</span>
         </div>
       </div>
 
-      <div class="editor-hints">
-        <span class="hint-chip">Arrastrar para mover</span>
-        <span class="hint-chip">Esquina ↘ para redimensionar</span>
-        <span class="hint-chip">Click para seleccionar</span>
-        <span class="hint-chip">Supr para borrar</span>
-        <span class="hint-chip">También podés arrastrar archivos al canvas</span>
-      </div>
-    </header>
+      <span class="status" id="status-pill"><span class="dot"></span> Conectado</span>
 
-    <main class="editor-main">
-      <div class="viewport-frame">
-        <span class="viewport-label">1920 × 1080 · preview</span>
+      <div class="spacer"></div>
+
+      <input class="input" id="name-input" placeholder="Tu nombre" maxlength="20">
+      <label class="btn btn-primary">
+        Subir imagen
+        <input type="file" id="file-input" accept="image/*" multiple>
+      </label>
+      <button class="btn btn-secondary" id="btn-clear-sel" type="button">Deseleccionar</button>
+    </div>
+
+    <div class="editor-help">
+      Arrastrá para mover · Esquina inferior derecha para redimensionar · Supr para borrar · Podés arrastrar archivos al canvas
+    </div>
+
+    <main class="editor-canvas-area">
+      <div class="canvas-shell">
+        <span class="canvas-badge">1920 × 1080</span>
         <div id="stage-wrap">
           <div id="stage">
-            <div class="stage-empty" id="stage-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
-              <p>Subí una imagen o arrastrala acá</p>
-            </div>
+            <div class="stage-empty" id="stage-empty">Todavía no hay imágenes</div>
           </div>
         </div>
       </div>
@@ -76,11 +62,8 @@
       document.body.innerHTML = `
         <div class="error-page app">
           <div class="card">
-            <div class="error-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>
-            </div>
-            <h2>Enlace inválido</h2>
-            <p>Necesitás un enlace con token del streamer. Pedile uno por DM.</p>
+            <h2>Link inválido</h2>
+            <p>Pedile al streamer un enlace de editor.</p>
           </div>
         </div>`;
       throw new Error("no token");
@@ -88,11 +71,11 @@
 
     nameInput.value = localStorage.getItem("overlay-name") || "";
     nameInput.addEventListener("change", () => localStorage.setItem("overlay-name", nameInput.value));
-    document.getElementById("author-badge").textContent = "Token · " + token;
+    document.getElementById("author-badge").textContent = "Token " + token;
 
     function fitStage() {
-      const maxW = window.innerWidth - 48;
-      const maxH = window.innerHeight - 160;
+      const maxW = window.innerWidth - 32;
+      const maxH = window.innerHeight - 130;
       scale = Math.min(maxW / 1920, maxH / 1080, 1);
       stageWrap.style.transform = `scale(${scale})`;
       stageWrap.style.width = "1920px";
@@ -103,11 +86,11 @@
 
     const socket = io();
     socket.on("connect", () => {
-      statusPill.classList.remove("offline");
-      statusPill.innerHTML = '<span class="dot"></span> En vivo';
+      statusPill.classList.remove("off");
+      statusPill.innerHTML = '<span class="dot"></span> Conectado';
     });
     socket.on("disconnect", () => {
-      statusPill.classList.add("offline");
+      statusPill.classList.add("off");
       statusPill.innerHTML = '<span class="dot"></span> Desconectado';
     });
     socket.on("state", sync);
