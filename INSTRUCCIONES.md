@@ -341,14 +341,29 @@ copy config.ejemplo.bat config.bat
 
 ### "address already in use :::3847"
 
-Ya hay un servidor corriendo. Cerrá la otra ventana donde hiciste `npm start`, o en PowerShell:
+El servidor ya está corriendo en otra ventana. **No es error del túnel.**
+
+**Opción A:** Usá la ventana que ya está abierta y solo abrí `iniciar-tunel.bat` en otra.
+
+**Opción B:** Para reiniciar con URL pública, usá `iniciar-servidor-publico.bat` (cierra el anterior solo).
+
+**Opción C — manual:**
 
 ```powershell
 netstat -ano | findstr :3847
 taskkill /PID NUMERO /F
 ```
 
-Reemplazá `NUMERO` por el PID que te salga.
+### "cloudflared no se reconoce" / túnel no arranca
+
+No confundir con el error del puerto 3847. Falta instalar cloudflared:
+
+1. https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+2. Extraer `cloudflared.exe` a `C:\cloudflared\`
+3. En `config.bat`: `set CLOUDFLARED=C:\cloudflared\cloudflared.exe`
+4. Correr `iniciar-tunel.bat` de nuevo
+
+El **servidor** (`iniciar-servidor.bat`) y el **túnel** (`iniciar-tunel.bat`) son **2 ventanas distintas**.
 
 ### "Cannot GET /" o página en blanco
 
