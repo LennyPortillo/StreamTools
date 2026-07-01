@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin — PENMA Overlay</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
+    h1 { margin-bottom: 8px; }
+    .sub { color: #888; margin-bottom: 32px; }
+    section {
+      background: #16213e;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    h2 { font-size: 1rem; margin-bottom: 16px; color: #e94560; }
+    input {
+      background: #0f3460;
+      border: 1px solid #333;
+      color: #eee;
+      padding: 10px 14px;
+      border-radius: 8px;
+      width: 100%;
+      margin-bottom: 12px;
+    }
+    button {
+      background: #e94560;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    button:hover { background: #c73a52; }
+    button.danger { background: #7a2030; }
+    button.danger:hover { background: #9a2840; }
+    .url-box {
+      background: #0f3460;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.85rem;
+      word-break: break-all;
+      margin: 8px 0;
+      cursor: pointer;
+    }
+    .url-box:hover { background: #1a4a7a; }
+    .token-list { list-style: none; }
+    .token-list li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid #333;
+    }
+    .token-list li:last-child { border-bottom: none; }
+    .obs-steps { line-height: 1.8; color: #ccc; font-size: 0.9rem; }
+    .obs-steps code { background: #0f3460; padding: 2px 6px; border-radius: 4px; }
+    .copied { color: #4ecca3; font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <h1>PENMA Overlay</h1>
+  <p class="sub">Panel de control para el streamer</p>
+
+  <section>
+    <h2>1. Acceso admin</h2>
+    <input type="password" id="secret" placeholder="ADMIN_SECRET">
+    <button id="btn-login">Entrar</button>
+  </section>
+
+  <div id="panel" style="display:none">
+    <section>
+      <h2>2. OBS — Browser Source</h2>
+      <div class="obs-steps">
+        <p>En OBS añade una fuente <strong>Browser</strong> con:</p>
+        <ul>
+          <li>URL: <code id="obs-url">—</code></li>
+          <li>Ancho: <strong>1920</strong> · Alto: <strong>1080</strong></li>
+          <li>Activar <strong>"Custom CSS"</strong> y pegar: <code>body { background-color: rgba(0,0,0,0); }</code></li>
+        </ul>
+      </div>
+      <div class="url-box" id="copy-overlay" title="Click para copiar">—</div>
+    </section>
+
+    <section>
+      <h2>3. Invitar colaboradores</h2>
+      <p style="color:#888;margin-bottom:12px;font-size:0.9rem">Genera un enlace y envíaselo a quien quieras. Solo ellos pueden subir y mover imágenes.</p>
+      <button id="btn-new-token">Generar enlace de editor</button>
+      <ul class="token-list" id="token-list"></ul>
+    </section>
+
+    <section>
+      <h2>4. Limpiar overlay</h2>
+      <p style="color:#888;margin-bottom:12px;font-size:0.9rem">Borra todas las imágenes del canvas.</p>
+      <button class="danger" id="btn-clear">Limpiar todo</button>
+    </section>
+  </div>
+
+  <script>
+    const secretInput = document.getElementById("secret");
+    const panel = document.getElementById("panel");
+    let secret = localStorage.getItem("admin-secret") || "";
+
+    if (secret) { secretInput.value = secret; load(); }
+
+    document.getElementById("btn-login").addEventListener("click", () => {
+      secret = secretInput.value;
+      localStorage.setItem("admin-secret", secret);
+      load();
+    });
+
+    function copy(text, el) {
+      navigator.clipboard.writeText(text);
+      const msg = document.createElement("span");
+      msg.className = "copied";
+      msg.textContent = " ✓ Copiado";
+      el.appendChild(msg);
+      setTimeout(() => msg.remove(), 1500);
+    }
+
+    async function load() {
+      const res = await fetch(`/api/admin/tokens?secret=${encodeURIComponent(secret)}`);
+      if (!res.ok) { alert("Secret incorrecto"); return; }
+      const data = await res.json();
+      panel.style.display = "block";
+
+      const overlayUrl = data.overlayUrl;
+      document.getElementById("obs-url").textContent = overlayUrl;
+      const copyEl = document.getElementById("copy-overlay");
+      copyEl.textContent = overlayUrl;
+      copyEl.onclick = () => copy(overlayUrl, copyEl);
+
+      const list = document.getElementById("token-list");
+      list.innerHTML = data.tokens.map(t => {
+        const url = `${location.origin}/editor.html?token=${t}`;
+        return `<li>
+          <code>${t}</code>
+          <span class="url-box" style="flex:1" data-url="${url}">${url}</span>
+        </li>`;
+      }).join("");
+      list.querySelectorAll(".url-box").forEach(el => {
+        el.onclick = () => copy(el.dataset.url, el);
+      });
+    }
+
+    document.getElementById("btn-new-token").addEventListener("click", async () => {
+      await fetch("/api/admin/tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret }),
+      });
+      load();
+    });
+
+    document.getElementById("btn-clear").addEventListener("click", async () => {
+      if (!confirm("¿Borrar todas las imágenes?")) return;
+      await fetch("/api/admin/clear", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret }),
+      });
+      load();
+    });
+  </script>
+</body>
+</html>

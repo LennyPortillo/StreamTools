@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Overlay OBS</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 1920px;
+      height: 1080px;
+      overflow: hidden;
+      background: transparent;
+    }
+    #canvas {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+    }
+    .item {
+      position: absolute;
+      pointer-events: none;
+      transform-origin: center center;
+    }
+    .item img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas"></div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const canvas = document.getElementById("canvas");
+    const socket = io();
+    const rendered = new Map();
+
+    function renderItem(item) {
+      let el = rendered.get(item.id);
+      if (!el) {
+        el = document.createElement("div");
+        el.className = "item";
+        el.innerHTML = `<img src="${item.url}" alt="">`;
+        canvas.appendChild(el);
+        rendered.set(item.id, el);
+      }
+      el.style.left = item.x + "px";
+      el.style.top = item.y + "px";
+      el.style.width = item.width + "px";
+      el.style.height = item.height + "px";
+      el.style.transform = `rotate(${item.rotation || 0}deg)`;
+    }
+
+    function sync(items) {
+      const ids = new Set(items.map(i => i.id));
+      for (const [id, el] of rendered) {
+        if (!ids.has(id)) { el.remove(); rendered.delete(id); }
+      }
+      items.forEach(renderItem);
+    }
+
+    socket.on("state", sync);
+    fetch("/api/state").then(r => r.json()).then(sync);
+  </script>
+</body>
+</html>

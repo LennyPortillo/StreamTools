@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Editor Overlay</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #1a1a2e;
+      color: #eee;
+      min-height: 100vh;
+    }
+    header {
+      padding: 12px 20px;
+      background: #16213e;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    header h1 { font-size: 1.1rem; font-weight: 600; }
+    .badge { background: #0f3460; padding: 4px 10px; border-radius: 6px; font-size: 0.85rem; }
+    .toolbar { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+    button, label.btn {
+      background: #e94560;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.9rem;
+    }
+    button:hover, label.btn:hover { background: #c73a52; }
+    button.secondary { background: #0f3460; }
+    button.secondary:hover { background: #1a4a7a; }
+    label.btn input { display: none; }
+    #name-input {
+      background: #0f3460;
+      border: 1px solid #333;
+      color: #eee;
+      padding: 8px 12px;
+      border-radius: 6px;
+      width: 140px;
+    }
+    main {
+      display: flex;
+      justify-content: center;
+      padding: 20px;
+      overflow: auto;
+    }
+    #stage-wrap {
+      position: relative;
+      border: 2px solid #333;
+      box-shadow: 0 0 40px rgba(0,0,0,0.5);
+    }
+    #stage {
+      position: relative;
+      width: 1920px;
+      height: 1080px;
+      background: repeating-conic-gradient(#222 0% 25%, #2a2a2a 0% 50%) 50% / 40px 40px;
+      transform-origin: top left;
+    }
+    .item {
+      position: absolute;
+      cursor: grab;
+      transform-origin: center center;
+      border: 2px solid transparent;
+    }
+    .item:hover, .item.selected { border-color: #e94560; }
+    .item img { width: 100%; height: 100%; object-fit: contain; pointer-events: none; display: block; }
+    .resize-handle {
+      position: absolute;
+      width: 12px; height: 12px;
+      background: #e94560;
+      border-radius: 2px;
+      bottom: -6px; right: -6px;
+      cursor: se-resize;
+      display: none;
+    }
+    .item.selected .resize-handle { display: block; }
+    .item .delete-btn {
+      position: absolute;
+      top: -10px; right: -10px;
+      width: 22px; height: 22px;
+      background: #e94560;
+      border: none;
+      border-radius: 50%;
+      color: white;
+      font-size: 14px;
+      cursor: pointer;
+      display: none;
+      line-height: 1;
+    }
+    .item.selected .delete-btn { display: block; }
+    .error {
+      text-align: center;
+      padding: 60px 20px;
+      color: #e94560;
+    }
+    .hint { font-size: 0.85rem; color: #888; padding: 8px 20px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Editor Overlay</h1>
+    <span class="badge" id="author-badge">—</span>
+    <input id="name-input" placeholder="Tu nombre" maxlength="20">
+    <div class="toolbar">
+      <label class="btn">Subir imagen<input type="file" id="file-input" accept="image/*" multiple></label>
+      <button class="secondary" id="btn-clear-sel">Deseleccionar</button>
+    </div>
+  </header>
+  <p class="hint">Arrastra imágenes para moverlas · Esquina inferior derecha para redimensionar · Click para seleccionar · Supr para borrar</p>
+  <main><div id="stage-wrap"><div id="stage"></div></div></main>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const token = params.get("token");
+    const stage = document.getElementById("stage");
+    const stageWrap = document.getElementById("stage-wrap");
+    const nameInput = document.getElementById("name-input");
+    const rendered = new Map();
+    let selectedId = null;
+    let scale = 1;
+
+    if (!token) {
+      document.body.innerHTML = '<div class="error"><h2>Token requerido</h2><p>Pide al streamer un enlace de editor.</p></div>';
+      throw new Error("no token");
+    }
+
+    nameInput.value = localStorage.getItem("overlay-name") || "";
+    nameInput.addEventListener("change", () => localStorage.setItem("overlay-name", nameInput.value));
+    document.getElementById("author-badge").textContent = "Token: " + token;
+
+    function fitStage() {
+      const maxW = window.innerWidth - 40;
+      const maxH = window.innerHeight - 120;
+      scale = Math.min(maxW / 1920, maxH / 1080, 1);
+      stageWrap.style.transform = `scale(${scale})`;
+      stageWrap.style.width = "1920px";
+      stageWrap.style.height = (1080 * scale) + "px";
+    }
+    window.addEventListener("resize", fitStage);
+    fitStage();
+
+    const socket = io();
+    socket.on("state", sync);
+
+    function api(method, url, body) {
+      const opts = { method, headers: {} };
+      if (body && !(body instanceof FormData)) {
+        opts.headers["Content-Type"] = "application/json";
+        opts.body = JSON.stringify({ ...body, token });
+      } else if (body instanceof FormData) {
+        body.append("token", token);
+        body.append("name", nameInput.value || "Anónimo");
+        opts.body = body;
+      }
+      return fetch(url, opts).then(r => r.json());
+    }
+
+    function createEl(item) {
+      const el = document.createElement("div");
+      el.className = "item";
+      el.dataset.id = item.id;
+      el.innerHTML = `
+        <img src="${item.url}" alt="">
+        <div class="resize-handle"></div>
+        <button class="delete-btn" title="Borrar">×</button>`;
+      applyTransform(el, item);
+      setupDrag(el, item);
+      setupResize(el.querySelector(".resize-handle"), el, item);
+      el.addEventListener("click", e => { e.stopPropagation(); select(item.id); });
+      el.querySelector(".delete-btn").addEventListener("click", e => {
+        e.stopPropagation();
+        api("DELETE", `/api/items/${item.id}?token=${token}`);
+      });
+      stage.appendChild(el);
+      return el;
+    }
+
+    function applyTransform(el, item) {
+      el.style.left = item.x + "px";
+      el.style.top = item.y + "px";
+      el.style.width = item.width + "px";
+      el.style.height = item.height + "px";
+      el.style.transform = `rotate(${item.rotation || 0}deg)`;
+    }
+
+    function select(id) {
+      selectedId = id;
+      rendered.forEach((el, iid) => el.classList.toggle("selected", iid === id));
+    }
+
+    stage.addEventListener("click", () => select(null));
+    document.getElementById("btn-clear-sel").addEventListener("click", () => select(null));
+
+    document.addEventListener("keydown", e => {
+      if ((e.key === "Delete" || e.key === "Backspace") && selectedId) {
+        api("DELETE", `/api/items/${selectedId}?token=${token}`);
+        selectedId = null;
+      }
+    });
+
+    function setupDrag(el, item) {
+      let dragging = false, startX, startY, origX, origY;
+      el.addEventListener("pointerdown", e => {
+        if (e.target.classList.contains("resize-handle") || e.target.classList.contains("delete-btn")) return;
+        dragging = true;
+        el.setPointerCapture(e.pointerId);
+        startX = e.clientX; startY = e.clientY;
+        origX = item.x; origY = item.y;
+        el.style.cursor = "grabbing";
+        select(item.id);
+      });
+      el.addEventListener("pointermove", e => {
+        if (!dragging) return;
+        item.x = origX + (e.clientX - startX) / scale;
+        item.y = origY + (e.clientY - startY) / scale;
+        applyTransform(el, item);
+      });
+      el.addEventListener("pointerup", () => {
+        if (!dragging) return;
+        dragging = false;
+        el.style.cursor = "grab";
+        api("PUT", `/api/items/${item.id}`, { x: item.x, y: item.y });
+      });
+    }
+
+    function setupResize(handle, el, item) {
+      let resizing = false, startX, startY, origW, origH;
+      handle.addEventListener("pointerdown", e => {
+        e.stopPropagation();
+        resizing = true;
+        handle.setPointerCapture(e.pointerId);
+        startX = e.clientX; startY = e.clientY;
+        origW = item.width; origH = item.height;
+      });
+      handle.addEventListener("pointermove", e => {
+        if (!resizing) return;
+        item.width = Math.max(40, origW + (e.clientX - startX) / scale);
+        item.height = Math.max(40, origH + (e.clientY - startY) / scale);
+        applyTransform(el, item);
+      });
+      handle.addEventListener("pointerup", () => {
+        if (!resizing) return;
+        resizing = false;
+        api("PUT", `/api/items/${item.id}`, { width: item.width, height: item.height });
+      });
+    }
+
+    function sync(items) {
+      const ids = new Set(items.map(i => i.id));
+      for (const [id, el] of rendered) {
+        if (!ids.has(id)) { el.remove(); rendered.delete(id); if (selectedId === id) selectedId = null; }
+      }
+      items.forEach(item => {
+        let el = rendered.get(item.id);
+        if (!el) { el = createEl(item); rendered.set(item.id, el); }
+        else applyTransform(el, item);
+      });
+    }
+
+    document.getElementById("file-input").addEventListener("change", async e => {
+      for (const file of e.target.files) {
+        const fd = new FormData();
+        fd.append("image", file);
+        await api("POST", "/api/upload", fd);
+      }
+      e.target.value = "";
+    });
+
+    fetch("/api/state").then(r => r.json()).then(sync);
+  </script>
+</body>
+</html>
