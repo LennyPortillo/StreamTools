@@ -3,108 +3,102 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin — PENMA Overlay</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: system-ui, sans-serif;
-      background: #1a1a2e;
-      color: #eee;
-      max-width: 720px;
-      margin: 0 auto;
-      padding: 40px 20px;
-    }
-    h1 { margin-bottom: 8px; }
-    .sub { color: #888; margin-bottom: 32px; }
-    section {
-      background: #16213e;
-      border-radius: 12px;
-      padding: 24px;
-      margin-bottom: 20px;
-    }
-    h2 { font-size: 1rem; margin-bottom: 16px; color: #e94560; }
-    input {
-      background: #0f3460;
-      border: 1px solid #333;
-      color: #eee;
-      padding: 10px 14px;
-      border-radius: 8px;
-      width: 100%;
-      margin-bottom: 12px;
-    }
-    button {
-      background: #e94560;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 0.95rem;
-    }
-    button:hover { background: #c73a52; }
-    button.danger { background: #7a2030; }
-    button.danger:hover { background: #9a2840; }
-    .url-box {
-      background: #0f3460;
-      padding: 12px 16px;
-      border-radius: 8px;
-      font-family: monospace;
-      font-size: 0.85rem;
-      word-break: break-all;
-      margin: 8px 0;
-      cursor: pointer;
-    }
-    .url-box:hover { background: #1a4a7a; }
-    .token-list { list-style: none; }
-    .token-list li {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 10px 0;
-      border-bottom: 1px solid #333;
-    }
-    .token-list li:last-child { border-bottom: none; }
-    .obs-steps { line-height: 1.8; color: #ccc; font-size: 0.9rem; }
-    .obs-steps code { background: #0f3460; padding: 2px 6px; border-radius: 4px; }
-    .copied { color: #4ecca3; font-size: 0.8rem; }
-  </style>
+  <title>Admin — StreamTools</title>
+  <link rel="stylesheet" href="/css/theme.css">
 </head>
 <body>
-  <h1>PENMA Overlay</h1>
-  <p class="sub">Panel de control para el streamer</p>
-
-  <section>
-    <h2>1. Acceso admin</h2>
-    <input type="password" id="secret" placeholder="ADMIN_SECRET">
-    <button id="btn-login">Entrar</button>
-  </section>
-
-  <div id="panel" style="display:none">
-    <section>
-      <h2>2. OBS — Browser Source</h2>
-      <div class="obs-steps">
-        <p>En OBS añade una fuente <strong>Browser</strong> con:</p>
-        <ul>
-          <li>URL: <code id="obs-url">—</code></li>
-          <li>Ancho: <strong>1920</strong> · Alto: <strong>1080</strong></li>
-          <li>Activar <strong>"Custom CSS"</strong> y pegar: <code>body { background-color: rgba(0,0,0,0); }</code></li>
-        </ul>
+  <div class="app admin-wrap">
+    <header class="admin-hero">
+      <div class="brand">
+        <div class="brand-mark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2"/>
+            <path d="M8 21h8M12 17v4"/>
+          </svg>
+        </div>
+        <div>
+          <h1>StreamTools</h1>
+          <span>Panel del streamer</span>
+        </div>
       </div>
-      <div class="url-box" id="copy-overlay" title="Click para copiar">—</div>
-    </section>
+      <p>Gestioná el overlay, generá enlaces para viewers y configurá OBS.</p>
+    </header>
 
-    <section>
-      <h2>3. Invitar colaboradores</h2>
-      <p style="color:#888;margin-bottom:12px;font-size:0.9rem">Genera un enlace y envíaselo a quien quieras. Solo ellos pueden subir y mover imágenes.</p>
-      <button id="btn-new-token">Generar enlace de editor</button>
-      <ul class="token-list" id="token-list"></ul>
-    </section>
+    <div class="admin-stack">
+      <section class="card">
+        <div class="card-header">
+          <div class="step-num">1</div>
+          <div>
+            <h2>Acceso admin</h2>
+            <p>Solo vos tenés esta clave. No la compartas en el chat.</p>
+          </div>
+        </div>
+        <div class="login-row">
+          <input class="input" type="password" id="secret" placeholder="Tu ADMIN_SECRET">
+          <button class="btn btn-primary" id="btn-login">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg>
+            Entrar
+          </button>
+        </div>
+      </section>
 
-    <section>
-      <h2>4. Limpiar overlay</h2>
-      <p style="color:#888;margin-bottom:12px;font-size:0.9rem">Borra todas las imágenes del canvas.</p>
-      <button class="danger" id="btn-clear">Limpiar todo</button>
-    </section>
+      <div id="panel" style="display:none" class="admin-stack">
+        <div class="stats-row">
+          <div class="stat-pill">Imágenes en overlay: <strong id="stat-items">0</strong></div>
+          <div class="stat-pill">Enlaces activos: <strong id="stat-tokens">0</strong></div>
+        </div>
+
+        <section class="card">
+          <div class="card-header">
+            <div class="step-num">2</div>
+            <div>
+              <h2>OBS — Browser Source</h2>
+              <p>Agregá esta URL como fuente Navegador en OBS.</p>
+            </div>
+          </div>
+          <ul class="obs-list">
+            <li><strong>URL</strong> <code id="obs-url">—</code></li>
+            <li><strong>Tamaño</strong> 1920 × 1080 px</li>
+            <li><strong>CSS personalizado</strong> <code class="inline-code">body { background-color: rgba(0,0,0,0); }</code></li>
+          </ul>
+          <div class="copy-box" id="copy-overlay" title="Click para copiar">
+            <code>—</code>
+            <svg class="copy-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <div class="step-num">3</div>
+            <div>
+              <h2>Invitar viewers</h2>
+              <p>Generá un enlace y mandalo por DM. Solo quien lo tenga puede editar.</p>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="btn-new-token">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            Generar enlace de editor
+          </button>
+          <ul class="token-list" id="token-list"></ul>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <div class="step-num">4</div>
+            <div>
+              <h2>Limpiar overlay</h2>
+              <p>Borrá todas las imágenes del canvas de una vez.</p>
+            </div>
+          </div>
+          <div class="card-actions">
+            <button class="btn btn-danger" id="btn-clear">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              Limpiar todo
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -114,6 +108,8 @@
 
     if (secret) { secretInput.value = secret; load(); }
 
+    secretInput.addEventListener("keydown", e => { if (e.key === "Enter") document.getElementById("btn-login").click(); });
+
     document.getElementById("btn-login").addEventListener("click", () => {
       secret = secretInput.value;
       localStorage.setItem("admin-secret", secret);
@@ -122,34 +118,48 @@
 
     function copy(text, el) {
       navigator.clipboard.writeText(text);
+      const existing = el.querySelector(".copied-toast");
+      if (existing) existing.remove();
       const msg = document.createElement("span");
-      msg.className = "copied";
-      msg.textContent = " ✓ Copiado";
+      msg.className = "copied-toast";
+      msg.textContent = "Copiado";
       el.appendChild(msg);
-      setTimeout(() => msg.remove(), 1500);
+      setTimeout(() => msg.remove(), 1800);
     }
 
     async function load() {
       const res = await fetch(`/api/admin/tokens?secret=${encodeURIComponent(secret)}`);
       if (!res.ok) { alert("Secret incorrecto"); return; }
       const data = await res.json();
-      panel.style.display = "block";
+      panel.style.display = "flex";
+
+      document.getElementById("stat-items").textContent = data.itemCount;
+      document.getElementById("stat-tokens").textContent = data.tokens.length;
 
       const overlayUrl = data.overlayUrl;
       document.getElementById("obs-url").textContent = overlayUrl;
       const copyEl = document.getElementById("copy-overlay");
-      copyEl.textContent = overlayUrl;
+      copyEl.querySelector("code").textContent = overlayUrl;
       copyEl.onclick = () => copy(overlayUrl, copyEl);
 
       const list = document.getElementById("token-list");
+      if (!data.tokens.length) {
+        list.innerHTML = '<li class="empty-tokens">Todavía no hay enlaces. Generá uno para invitar viewers.</li>';
+        return;
+      }
+
       list.innerHTML = data.tokens.map(t => {
         const url = `${location.origin}/editor.html?token=${t}`;
-        return `<li>
-          <code>${t}</code>
-          <span class="url-box" style="flex:1" data-url="${url}">${url}</span>
+        return `<li class="token-item">
+          <span class="token-chip">${t}</span>
+          <div class="copy-box" data-url="${url}">
+            <code>${url}</code>
+            <svg class="copy-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </div>
         </li>`;
       }).join("");
-      list.querySelectorAll(".url-box").forEach(el => {
+
+      list.querySelectorAll(".copy-box").forEach(el => {
         el.onclick = () => copy(el.dataset.url, el);
       });
     }
@@ -164,7 +174,7 @@
     });
 
     document.getElementById("btn-clear").addEventListener("click", async () => {
-      if (!confirm("¿Borrar todas las imágenes?")) return;
+      if (!confirm("¿Borrar todas las imágenes del overlay?")) return;
       await fetch("/api/admin/clear", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
