@@ -4,24 +4,36 @@ cd /d "%~dp0"
 
 if exist config.bat call config.bat
 
-if not defined CLOUDFLARED set CLOUDFLARED=cloudflared
-
-where "%CLOUDFLARED%" >nul 2>&1
-if errorlevel 1 (
-  if not exist "%CLOUDFLARED%" (
-    echo.
-    echo  ERROR: cloudflared no encontrado.
-    echo.
-    echo  1. Descarga Windows 64-bit desde:
-    echo     https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
-    echo  2. Extrae cloudflared.exe a C:\cloudflared\
-    echo  3. En config.bat pon: set CLOUDFLARED=C:\cloudflared\cloudflared.exe
-    echo.
-    pause
-    exit /b 1
+REM Auto-detectar si no esta en config.bat
+if not defined CLOUDFLARED (
+  if exist "C:\cloudflared\cloudflared.exe" (
+    set "CLOUDFLARED=C:\cloudflared\cloudflared.exe"
+  ) else (
+    set "CLOUDFLARED=cloudflared"
   )
 )
 
+REM Verificar que existe (ruta completa o en PATH)
+if exist "%CLOUDFLARED%" goto :run
+where "%CLOUDFLARED%" >nul 2>&1
+if not errorlevel 1 goto :run
+
+echo.
+echo  ERROR: cloudflared no encontrado.
+echo.
+echo  Ya funciona con: C:\cloudflared\cloudflared.exe --version ?
+echo  Entonces agrega en config.bat:
+echo    set CLOUDFLARED=C:\cloudflared\cloudflared.exe
+echo.
+echo  O descarga desde:
+echo  https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/
+echo.
+pause
+exit /b 1
+
+:run
+echo.
+echo  Usando: %CLOUDFLARED%
 echo.
 echo  IMPORTANTE: El servidor debe estar corriendo en otra ventana
 echo  (iniciar-servidor.bat). Este script NO inicia el servidor.
