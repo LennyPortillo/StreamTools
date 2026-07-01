@@ -22,19 +22,55 @@ git --version
 
 ### 2. Clonar el repo
 
-El dev te pasa el link del repo (ejemplo):
+**Si todavía NO tenés la carpeta:**
 
 ```powershell
-cd C:\Users\TU-USUARIO\Desktop
+cd C:\Users\Penma
 git clone https://github.com/LennyPortillo/StreamTools.git
 cd StreamTools
 ```
 
+**Si ya tenés `StreamTools` (error "already exists"):**
+
+```powershell
+cd C:\Users\Penma\StreamTools
+git pull
+```
+
+No hace falta clonar de nuevo. `git pull` baja la versión nueva.
+
+### 2b. Instalar Node.js (si `npm` no se reconoce)
+
+Si ves *"npm no se reconoce como comando"*:
+
+1. Entrá a https://nodejs.org
+2. Descargá la versión **LTS**
+3. Instalá (Next → Next, dejá todo por defecto)
+4. **Cerrá CMD y abrí una ventana nueva**
+5. Verificá:
+
+```powershell
+node -v
+npm -v
+```
+
+Si ves números de versión, recién ahí corré `npm install`.
+
 ### 3. Configurar tu clave (solo una vez)
+
+**Primero** asegurate de tener la última versión (`git pull`).
 
 ```powershell
 copy config.ejemplo.bat config.bat
 notepad config.bat
+```
+
+Si `config.ejemplo.bat` no existe, hacé `git pull` primero.  
+Si igual no aparece, crealo a mano con Notepad — archivo `config.bat` en la carpeta StreamTools:
+
+```bat
+set ADMIN_SECRET=tu-clave-secreta-aqui
+set CLOUDFLARED=C:\cloudflared\cloudflared.exe
 ```
 
 Editá `ADMIN_SECRET` con una clave que solo vos sepas. Guardá.
@@ -280,6 +316,28 @@ Vos deberías ver la imagen al instante en OBS.
 ---
 
 ## Problemas frecuentes
+
+### "destination path already exists"
+
+Ya clonaste antes. Entrá a la carpeta y actualizá:
+
+```powershell
+cd C:\Users\Penma\StreamTools
+git pull
+```
+
+### "npm no se reconoce"
+
+Node.js no está instalado o hay que abrir CMD de nuevo después de instalarlo. Ver sección **2b** arriba.
+
+### "No se encuentra config.ejemplo.bat"
+
+Tu carpeta es vieja. En la carpeta StreamTools:
+
+```powershell
+git pull
+copy config.ejemplo.bat config.bat
+```
 
 ### "address already in use :::3847"
 
