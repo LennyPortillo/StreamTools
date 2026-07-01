@@ -28,7 +28,11 @@
       </div>
     </div>
 
-    <div id="panel" style="display:none">
+      <div id="panel" style="display:none">
+      <div id="warn-local" class="card" style="display:none;border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.08);margin-bottom:12px">
+        <p class="card-title" style="color:#ef4444">Links de viewers NO listos</p>
+        <p class="card-desc" style="margin-bottom:0">El servidor arrancó sin URL pública. Corré <strong>paso-final.bat</strong>, pegá la URL del túnel, y recargá esta página.</p>
+      </div>
       <div class="admin-stats">
         <span><strong id="stat-items">0</strong> imágenes</span>
         <span><strong id="stat-tokens">0</strong> links activos</span>
@@ -128,20 +132,29 @@
       return t.length > 10 ? t.slice(0, 8) + "…" : t;
     }
 
+    function editorLink(base, token) {
+      const root = base.replace(/\/$/, "");
+      return `${root}/editor.html?token=${token}`;
+    }
+
     async function load() {
       const res = await api("/api/admin/tokens");
       if (!res.ok) return;
       const data = await res.json();
       panel.style.display = "block";
 
+      document.getElementById("warn-local").style.display = data.viewerLinksReady ? "none" : "block";
+
       document.getElementById("stat-items").textContent = data.itemCount;
       document.getElementById("stat-tokens").textContent = data.tokens.length;
 
-      const overlayUrl = data.overlayUrl;
-      document.getElementById("obs-url").textContent = overlayUrl;
+      const obsUrl = data.obsOverlayUrl || `http://localhost:3847/overlay.html`;
+      document.getElementById("obs-url").textContent = obsUrl;
       const copyEl = document.getElementById("copy-overlay");
-      copyEl.querySelector("code").textContent = overlayUrl;
-      copyEl.onclick = () => copy(overlayUrl, copyEl);
+      copyEl.querySelector("code").textContent = obsUrl;
+      copyEl.onclick = () => copy(obsUrl, copyEl);
+
+      const publicBase = data.publicBaseUrl || data.overlayUrl?.replace(/\/overlay\.html$/, "") || location.origin;
 
       const list = document.getElementById("token-list");
       if (!data.tokens.length) {
@@ -150,7 +163,7 @@
       }
 
       list.innerHTML = data.tokens.map(t => {
-        const url = `${location.origin}/editor.html?token=${t}`;
+        const url = editorLink(publicBase, t);
         return `<li class="link-row">
           <span class="token" title="${t}">${shortToken(t)}</span>
           <div class="copy-field" data-url="${url}">

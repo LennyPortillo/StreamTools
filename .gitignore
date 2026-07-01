@@ -3,3 +3,4 @@ uploads/
 data.json
 .env
 config.bat
+public-url.local

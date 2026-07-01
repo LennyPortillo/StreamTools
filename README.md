@@ -9,6 +9,12 @@ Overlay colaborativo para OBS: viewers invitados suben y mueven imágenes en tie
 | **Dev** (vos) | Subís cambios al repo de GitHub |
 | **PENMA** (streamer) | Clona el repo, hace `git pull` cuando hay updates, corre el overlay en directo |
 
+## PENMA — empezar de cero
+
+**Leé [EMPEZAR-AQUI.md](./EMPEZAR-AQUI.md)** — 3 pasos: `arrancar-todo.bat` → `paso-final.bat` → admin.
+
+---
+
 ## PENMA — primera vez
 
 Ver **[INSTRUCCIONES.md](./INSTRUCCIONES.md)** (guía completa en Windows).

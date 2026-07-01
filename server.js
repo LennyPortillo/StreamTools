@@ -220,9 +220,13 @@ app.get("/api/admin/session", (req, res) => {
 });
 
 app.get("/api/admin/tokens", requireAdmin, (_req, res) => {
+  const isPublic = !PUBLIC_URL.includes("localhost") && !PUBLIC_URL.includes("127.0.0.1");
   res.json({
     tokens: state.editorTokens,
+    publicBaseUrl: PUBLIC_URL,
+    obsOverlayUrl: `http://localhost:${PORT}/overlay.html`,
     overlayUrl: `${PUBLIC_URL}/overlay.html`,
+    viewerLinksReady: isPublic,
     itemCount: state.items.length,
   });
 });
