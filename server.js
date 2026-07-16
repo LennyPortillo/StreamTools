@@ -14,7 +14,9 @@ const UPLOADS_DIR = path.join(__dirname, "uploads");
 const DATA_FILE = path.join(__dirname, "data.json");
 
 const MAX_ITEMS = 80;
+const MAX_PENDING = 50;
 const MAX_TOKENS = 25;
+const MAX_MOD_TOKENS = 10;
 const MAX_NAME_LEN = 24;
 const SESSION_MS = 8 * 60 * 60 * 1000;
 const ALLOWED_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
@@ -26,9 +28,21 @@ if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
 function loadData() {
   try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    const data = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    if (!Array.isArray(data.items)) data.items = [];
+    if (!Array.isArray(data.pendingItems)) data.pendingItems = [];
+    if (!Array.isArray(data.editorTokens)) data.editorTokens = [];
+    if (!Array.isArray(data.modTokens)) data.modTokens = [];
+    if (data.moderationEnabled === undefined) data.moderationEnabled = true;
+    return data;
   } catch {
-    return { items: [], editorTokens: [] };
+    return {
+      items: [],
+      pendingItems: [],
+      editorTokens: [],
+      modTokens: [],
+      moderationEnabled: true,
+    };
   }
 }
 
@@ -110,6 +124,23 @@ function requireAdmin(req, res, next) {
 
 function isValidToken(token) {
   return typeof token === "string" && state.editorTokens.includes(token);
+}
+
+function isValidModToken(token) {
+  return typeof token === "string" && state.modTokens.includes(token);
+}
+
+function emitState() {
+  io.emit("state", state.items);
+}
+
+function emitPending() {
+  io.emit("pending", state.pendingItems);
+}
+
+function deleteItemFile(url) {
+  const filePath = safeUploadPath(path.basename(url));
+  if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
 }
 
 function sanitizeName(raw) {
@@ -197,6 +228,12 @@ app.get("/api/state", (_req, res) => {
   res.json(state.items);
 });
 
+app.get("/api/editor/config", (req, res) => {
+  const token = req.query.token;
+  if (!isValidToken(token)) return res.status(403).json({ error: "Token inválido" });
+  res.json({ moderationEnabled: state.moderationEnabled !== false });
+});
+
 app.post("/api/admin/login", rateLimit("login", 8, 15 * 60 * 1000), (req, res) => {
   const secret = req.body?.secret;
   if (!secret || !timingSafeEqual(secret, ADMIN_SECRET)) {
@@ -223,6 +260,9 @@ app.get("/api/admin/tokens", requireAdmin, (_req, res) => {
   const isPublic = !PUBLIC_URL.includes("localhost") && !PUBLIC_URL.includes("127.0.0.1");
   res.json({
     tokens: state.editorTokens,
+    modTokens: state.modTokens,
+    moderationEnabled: state.moderationEnabled !== false,
+    pendingCount: state.pendingItems.length,
     publicBaseUrl: PUBLIC_URL,
     obsOverlayUrl: `http://localhost:${PORT}/overlay.html`,
     overlayUrl: `${PUBLIC_URL}/overlay.html`,
@@ -249,14 +289,41 @@ app.delete("/api/admin/tokens/:token", requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete("/api/admin/clear", requireAdmin, (_req, res) => {
-  for (const item of state.items) {
-    const filePath = safeUploadPath(path.basename(item.url));
-    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+app.post("/api/admin/mod-tokens", requireAdmin, (_req, res) => {
+  if (state.modTokens.length >= MAX_MOD_TOKENS) {
+    return res.status(400).json({ error: `Máximo ${MAX_MOD_TOKENS} links de mod activos` });
   }
-  state.items = [];
+  const token = crypto.randomBytes(16).toString("hex");
+  state.modTokens.push(token);
   saveData(state);
-  io.emit("state", state.items);
+  res.json({ token, url: `${PUBLIC_URL}/mod.html?token=${token}` });
+});
+
+app.delete("/api/admin/mod-tokens/:token", requireAdmin, (req, res) => {
+  const idx = state.modTokens.indexOf(req.params.token);
+  if (idx === -1) return res.status(404).json({ error: "Token no encontrado" });
+  state.modTokens.splice(idx, 1);
+  saveData(state);
+  res.json({ ok: true });
+});
+
+app.put("/api/admin/moderation", requireAdmin, (req, res) => {
+  if (typeof req.body?.enabled !== "boolean") {
+    return res.status(400).json({ error: "Parámetro inválido" });
+  }
+  state.moderationEnabled = req.body.enabled;
+  saveData(state);
+  res.json({ moderationEnabled: state.moderationEnabled });
+});
+
+app.delete("/api/admin/clear", requireAdmin, (_req, res) => {
+  for (const item of state.items) deleteItemFile(item.url);
+  for (const item of state.pendingItems) deleteItemFile(item.url);
+  state.items = [];
+  state.pendingItems = [];
+  saveData(state);
+  emitState();
+  emitPending();
   res.json({ ok: true });
 });
 
@@ -265,7 +332,14 @@ app.post("/api/upload", rateLimit("upload", 30, 60 * 1000), upload.single("image
   if (!isValidToken(token)) return res.status(403).json({ error: "Token inválido" });
 
   if (!req.file) return res.status(400).json({ error: "Sin archivo" });
-  if (state.items.length >= MAX_ITEMS) return res.status(400).json({ error: "Overlay lleno" });
+
+  if (state.moderationEnabled !== false) {
+    if (state.pendingItems.length >= MAX_PENDING) {
+      return res.status(400).json({ error: "Cola de moderación llena" });
+    }
+  } else if (state.items.length >= MAX_ITEMS) {
+    return res.status(400).json({ error: "Overlay lleno" });
+  }
 
   const filePath = safeUploadPath(req.file.filename);
   if (!filePath) return res.status(400).json({ error: "Archivo inválido" });
@@ -288,9 +362,16 @@ app.post("/api/upload", rateLimit("upload", 30, 60 * 1000), upload.single("image
     createdAt: Date.now(),
   };
 
+  if (state.moderationEnabled !== false) {
+    state.pendingItems.push(item);
+    saveData(state);
+    emitPending();
+    return res.json({ ...item, pending: true });
+  }
+
   state.items.push(item);
   saveData(state);
-  io.emit("state", state.items);
+  emitState();
   res.json(item);
 });
 
@@ -329,8 +410,105 @@ app.put("/api/items/:id", rateLimit("edit", 120, 60 * 1000), (req, res) => {
   }
 
   saveData(state);
-  io.emit("state", state.items);
+  emitState();
   res.json(state.items[idx]);
+});
+
+function updatePendingTransform(idx, body) {
+  const { x, y, width, height, rotation } = body;
+  if (x !== undefined) {
+    const v = clampNum(x, -500, 2500);
+    if (v === null) return "Coordenada inválida";
+    state.pendingItems[idx].x = v;
+  }
+  if (y !== undefined) {
+    const v = clampNum(y, -500, 1500);
+    if (v === null) return "Coordenada inválida";
+    state.pendingItems[idx].y = v;
+  }
+  if (width !== undefined) {
+    const v = clampNum(width, 20, 1920);
+    if (v === null) return "Tamaño inválido";
+    state.pendingItems[idx].width = v;
+  }
+  if (height !== undefined) {
+    const v = clampNum(height, 20, 1080);
+    if (v === null) return "Tamaño inválido";
+    state.pendingItems[idx].height = v;
+  }
+  if (rotation !== undefined) {
+    const v = clampNum(rotation, -360, 360);
+    if (v === null) return "Rotación inválida";
+    state.pendingItems[idx].rotation = v;
+  }
+  return null;
+}
+
+app.put("/api/pending/:id", rateLimit("edit", 120, 60 * 1000), (req, res) => {
+  const token = req.body?.token;
+  if (!isValidToken(token)) return res.status(403).json({ error: "Token inválido" });
+
+  const idx = state.pendingItems.findIndex((i) => i.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "No encontrado" });
+
+  const err = updatePendingTransform(idx, req.body);
+  if (err) return res.status(400).json({ error: err });
+
+  saveData(state);
+  emitPending();
+  res.json(state.pendingItems[idx]);
+});
+
+app.delete("/api/pending/:id", rateLimit("delete", 60, 60 * 1000), (req, res) => {
+  const token = req.query.token;
+  if (!isValidToken(token)) return res.status(403).json({ error: "Token inválido" });
+
+  const idx = state.pendingItems.findIndex((i) => i.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "No encontrado" });
+
+  deleteItemFile(state.pendingItems[idx].url);
+  state.pendingItems.splice(idx, 1);
+  saveData(state);
+  emitPending();
+  res.json({ ok: true });
+});
+
+app.get("/api/mod/pending", rateLimit("mod", 60, 60 * 1000), (req, res) => {
+  const token = req.query.token;
+  if (!isValidModToken(token)) return res.status(403).json({ error: "Token inválido" });
+  res.json(state.pendingItems);
+});
+
+app.post("/api/mod/:id/approve", rateLimit("mod", 60, 60 * 1000), (req, res) => {
+  const token = req.body?.token;
+  if (!isValidModToken(token)) return res.status(403).json({ error: "Token inválido" });
+
+  const idx = state.pendingItems.findIndex((i) => i.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "No encontrado" });
+  if (state.items.length >= MAX_ITEMS) {
+    return res.status(400).json({ error: "Overlay lleno" });
+  }
+
+  const item = state.pendingItems.splice(idx, 1)[0];
+  state.items.push(item);
+  saveData(state);
+  emitPending();
+  emitState();
+  res.json(item);
+});
+
+app.post("/api/mod/:id/reject", rateLimit("mod", 60, 60 * 1000), (req, res) => {
+  const token = req.body?.token;
+  if (!isValidModToken(token)) return res.status(403).json({ error: "Token inválido" });
+
+  const idx = state.pendingItems.findIndex((i) => i.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: "No encontrado" });
+
+  deleteItemFile(state.pendingItems[idx].url);
+  state.pendingItems.splice(idx, 1);
+  saveData(state);
+  emitPending();
+  res.json({ ok: true });
 });
 
 app.delete("/api/items/:id", rateLimit("delete", 60, 60 * 1000), (req, res) => {
@@ -340,12 +518,11 @@ app.delete("/api/items/:id", rateLimit("delete", 60, 60 * 1000), (req, res) => {
   const idx = state.items.findIndex((i) => i.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: "No encontrado" });
 
-  const filePath = safeUploadPath(path.basename(state.items[idx].url));
-  if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  deleteItemFile(state.items[idx].url);
 
   state.items.splice(idx, 1);
   saveData(state);
-  io.emit("state", state.items);
+  emitState();
   res.json({ ok: true });
 });
 
@@ -359,6 +536,7 @@ app.use((err, _req, res, next) => {
 
 io.on("connection", (socket) => {
   socket.emit("state", state.items);
+  socket.emit("pending", state.pendingItems);
 });
 
 server.listen(PORT, () => {

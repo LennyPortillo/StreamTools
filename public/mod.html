@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moderación — StreamTools</title>
+  <link rel="stylesheet" href="/css/theme.css">
+</head>
+<body>
+  <div class="app mod-page">
+    <header class="admin-header">
+      <div class="brand">
+        <div class="brand-icon">🛡</div>
+        <div>
+          <h1>Moderación</h1>
+          <span>Cola de imágenes pendientes</span>
+        </div>
+      </div>
+      <p>Aprobá o rechazá imágenes antes de que aparezcan en el overlay de OBS.</p>
+    </header>
+
+    <div class="mod-stats">
+      <span class="status" id="status-pill"><span class="dot"></span> Conectado</span>
+      <span><strong id="stat-pending">0</strong> en cola</span>
+    </div>
+
+    <div id="queue" class="mod-queue">
+      <div class="mod-empty card" id="empty-msg">
+        <p class="card-title">Sin imágenes pendientes</p>
+        <p class="card-desc">Cuando un viewer suba una imagen, aparecerá acá para revisar.</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const token = params.get("token");
+    const queue = document.getElementById("queue");
+    const emptyMsg = document.getElementById("empty-msg");
+    const statPending = document.getElementById("stat-pending");
+    const statusPill = document.getElementById("status-pill");
+
+    if (!token) {
+      document.body.innerHTML = `
+        <div class="error-page app">
+          <div class="card">
+            <h2>Link inválido</h2>
+            <p>Pedile a PENMA un enlace de moderador desde el panel admin.</p>
+          </div>
+        </div>`;
+      throw new Error("no token");
+    }
+
+    function api(method, url, body) {
+      const opts = { method, headers: { "Content-Type": "application/json" } };
+      if (body) opts.body = JSON.stringify({ ...body, token });
+      return fetch(url, opts).then(r => r.json());
+    }
+
+    function renderCard(item) {
+      const card = document.createElement("article");
+      card.className = "mod-card card";
+      card.dataset.id = item.id;
+      card.innerHTML = `
+        <div class="mod-preview">
+          <img src="${item.url}" alt="">
+        </div>
+        <div class="mod-meta">
+          <p class="mod-author">${escapeHtml(item.author || "Anónimo")}</p>
+          <p class="mod-size">${Math.round(item.width)}×${Math.round(item.height)} px</p>
+        </div>
+        <div class="mod-actions">
+          <button class="btn btn-approve" type="button">Aprobar</button>
+          <button class="btn btn-danger btn-reject" type="button">Rechazar</button>
+        </div>`;
+
+      card.querySelector(".btn-approve").addEventListener("click", async () => {
+        const btn = card.querySelector(".btn-approve");
+        btn.disabled = true;
+        const res = await api("POST", `/api/mod/${item.id}/approve`, {});
+        if (res.error) {
+          alert(res.error);
+          btn.disabled = false;
+        }
+      });
+
+      card.querySelector(".btn-reject").addEventListener("click", async () => {
+        if (!confirm("¿Rechazar esta imagen?")) return;
+        const btn = card.querySelector(".btn-reject");
+        btn.disabled = true;
+        const res = await api("POST", `/api/mod/${item.id}/reject`, {});
+        if (res.error) {
+          alert(res.error);
+          btn.disabled = false;
+        }
+      });
+
+      return card;
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function syncPending(items) {
+      statPending.textContent = items.length;
+      emptyMsg.style.display = items.length ? "none" : "block";
+
+      const ids = new Set(items.map(i => i.id));
+      queue.querySelectorAll(".mod-card").forEach(el => {
+        if (!ids.has(el.dataset.id)) el.remove();
+      });
+
+      items.forEach(item => {
+        if (queue.querySelector(`.mod-card[data-id="${item.id}"]`)) return;
+        queue.appendChild(renderCard(item));
+      });
+    }
+
+    const socket = io();
+    socket.on("connect", () => {
+      statusPill.classList.remove("off");
+      statusPill.innerHTML = '<span class="dot"></span> Conectado';
+    });
+    socket.on("disconnect", () => {
+      statusPill.classList.add("off");
+      statusPill.innerHTML = '<span class="dot"></span> Desconectado';
+    });
+    socket.on("pending", syncPending);
+
+    fetch(`/api/mod/pending?token=${encodeURIComponent(token)}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) {
+          document.body.innerHTML = `
+            <div class="error-page app">
+              <div class="card">
+                <h2>Acceso denegado</h2>
+                <p>${escapeHtml(data.error)}</p>
+              </div>
+            </div>`;
+          return;
+        }
+        syncPending(data);
+      });
+  </script>
+</body>
+</html>

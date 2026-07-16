@@ -60,6 +60,19 @@
         <ul class="link-list" id="token-list"></ul>
       </div>
 
+      <div class="section-label">Moderación</div>
+      <div class="card">
+        <p class="card-title">Cola de aprobación</p>
+        <p class="card-desc">Las imágenes de viewers pasan por moderación antes de aparecer en OBS. Compartí el link con tus mods de Kick.</p>
+        <label class="toggle-row">
+          <input type="checkbox" id="mod-enabled" checked>
+          <span>Moderación activa</span>
+        </label>
+        <p class="card-desc mod-pending-stat"><strong id="stat-pending">0</strong> imágenes esperando aprobación</p>
+        <button class="btn btn-primary" id="btn-new-mod-token">Generar link de mod</button>
+        <ul class="link-list" id="mod-token-list"></ul>
+      </div>
+
       <div class="section-label">Mantenimiento</div>
       <div class="card">
         <p class="card-desc">Elimina todas las imágenes del overlay.</p>
@@ -132,9 +145,40 @@
       return t.length > 10 ? t.slice(0, 8) + "…" : t;
     }
 
-    function editorLink(base, token) {
+    function editorLink(base, token, page) {
       const root = base.replace(/\/$/, "");
-      return `${root}/editor.html?token=${token}`;
+      return `${root}/${page || "editor.html"}?token=${token}`;
+    }
+
+    function renderLinkList(listEl, tokens, publicBase, page, revokePrefix) {
+      if (!tokens.length) {
+        listEl.innerHTML = '<li class="empty-msg">Todavía no hay links generados.</li>';
+        return;
+      }
+
+      listEl.innerHTML = tokens.map(t => {
+        const url = editorLink(publicBase, t, page);
+        return `<li class="link-row">
+          <span class="token" title="${t}">${shortToken(t)}</span>
+          <div class="copy-field" data-url="${url}">
+            <code>${url}</code>
+            <span class="copy-label">Copiar</span>
+          </div>
+          <button class="btn btn-secondary btn-revoke" data-token="${t}" type="button" title="Revocar">✕</button>
+        </li>`;
+      }).join("");
+
+      listEl.querySelectorAll(".copy-field").forEach(el => {
+        el.onclick = () => copy(el.dataset.url, el);
+      });
+
+      listEl.querySelectorAll(".btn-revoke").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          if (!confirm("¿Revocar este link?")) return;
+          await api(`${revokePrefix}/${btn.dataset.token}`, { method: "DELETE" });
+          load();
+        });
+      });
     }
 
     async function load() {
@@ -147,6 +191,17 @@
 
       document.getElementById("stat-items").textContent = data.itemCount;
       document.getElementById("stat-tokens").textContent = data.tokens.length;
+      document.getElementById("stat-pending").textContent = data.pendingCount ?? 0;
+
+      const modEnabled = document.getElementById("mod-enabled");
+      modEnabled.checked = data.moderationEnabled !== false;
+      modEnabled.onchange = async () => {
+        await api("/api/admin/moderation", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: modEnabled.checked }),
+        });
+      };
 
       const obsUrl = data.obsOverlayUrl || `http://localhost:3847/overlay.html`;
       document.getElementById("obs-url").textContent = obsUrl;
@@ -156,39 +211,26 @@
 
       const publicBase = data.publicBaseUrl || data.overlayUrl?.replace(/\/overlay\.html$/, "") || location.origin;
 
-      const list = document.getElementById("token-list");
-      if (!data.tokens.length) {
-        list.innerHTML = '<li class="empty-msg">Todavía no hay links generados.</li>';
-        return;
-      }
-
-      list.innerHTML = data.tokens.map(t => {
-        const url = editorLink(publicBase, t);
-        return `<li class="link-row">
-          <span class="token" title="${t}">${shortToken(t)}</span>
-          <div class="copy-field" data-url="${url}">
-            <code>${url}</code>
-            <span class="copy-label">Copiar</span>
-          </div>
-          <button class="btn btn-secondary btn-revoke" data-token="${t}" type="button" title="Revocar">✕</button>
-        </li>`;
-      }).join("");
-
-      list.querySelectorAll(".copy-field").forEach(el => {
-        el.onclick = () => copy(el.dataset.url, el);
-      });
-
-      list.querySelectorAll(".btn-revoke").forEach(btn => {
-        btn.addEventListener("click", async () => {
-          if (!confirm("¿Revocar este link? Quien lo tenga dejará de poder editar.")) return;
-          await api(`/api/admin/tokens/${btn.dataset.token}`, { method: "DELETE" });
-          load();
-        });
-      });
+      renderLinkList(document.getElementById("token-list"), data.tokens, publicBase, "editor.html", "/api/admin/tokens");
+      renderLinkList(document.getElementById("mod-token-list"), data.modTokens || [], publicBase, "mod.html", "/api/admin/mod-tokens");
     }
 
     document.getElementById("btn-new-token").addEventListener("click", async () => {
       const res = await api("/api/admin/tokens", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || "Error");
+        return;
+      }
+      load();
+    });
+
+    document.getElementById("btn-new-mod-token").addEventListener("click", async () => {
+      const res = await api("/api/admin/mod-tokens", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: "{}",

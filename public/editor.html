@@ -29,7 +29,7 @@
       <button class="btn btn-secondary" id="btn-clear-sel" type="button">Deseleccionar</button>
     </div>
 
-    <div class="editor-help">
+    <div class="editor-help" id="editor-help">
       Arrastrá para mover · Esquina inferior derecha para redimensionar · Supr para borrar · Podés arrastrar archivos al canvas
     </div>
 
@@ -55,8 +55,10 @@
     const nameInput = document.getElementById("name-input");
     const statusPill = document.getElementById("status-pill");
     const rendered = new Map();
+    const pendingRendered = new Map();
     let selectedId = null;
     let scale = 1;
+    let moderationEnabled = true;
 
     if (!token) {
       document.body.innerHTML = `
@@ -94,6 +96,17 @@
       statusPill.innerHTML = '<span class="dot"></span> Desconectado';
     });
     socket.on("state", sync);
+    socket.on("pending", syncPending);
+
+    fetch(`/api/editor/config?token=${encodeURIComponent(token)}`)
+      .then(r => r.json())
+      .then(cfg => {
+        if (cfg.moderationEnabled === false) return;
+        moderationEnabled = true;
+        const help = document.getElementById("editor-help");
+        help.innerHTML = "Las imágenes pasan por moderación antes de aparecer en OBS · " + help.textContent;
+      })
+      .catch(() => {});
 
     function api(method, url, body) {
       const opts = { method, headers: {} };
@@ -113,25 +126,49 @@
         if (!file.type.startsWith("image/")) continue;
         const fd = new FormData();
         fd.append("image", file);
-        await api("POST", "/api/upload", fd);
+        const res = await api("POST", "/api/upload", fd);
+        if (res.error) {
+          alert(res.error);
+        } else if (res.pending) {
+          showToast("Imagen enviada — esperando aprobación del mod");
+        }
       }
     }
 
-    function createEl(item) {
+    function showToast(msg) {
+      const t = document.createElement("div");
+      t.className = "editor-toast";
+      t.textContent = msg;
+      document.body.appendChild(t);
+      requestAnimationFrame(() => t.classList.add("show"));
+      setTimeout(() => {
+        t.classList.remove("show");
+        setTimeout(() => t.remove(), 300);
+      }, 3200);
+    }
+
+    function createEl(item, opts = {}) {
+      const pending = opts.pending;
       const el = document.createElement("div");
-      el.className = "item";
+      el.className = pending ? "item pending" : "item";
       el.dataset.id = item.id;
-      el.innerHTML = `
-        <img src="${item.url}" alt="">
-        <div class="resize-handle"></div>
-        <button class="delete-btn" type="button" title="Borrar">×</button>`;
+      el.innerHTML = pending
+        ? `<img src="${item.url}" alt="">
+           <span class="pending-badge">En revisión</span>
+           <div class="resize-handle"></div>
+           <button class="delete-btn" type="button" title="Cancelar">×</button>`
+        : `<img src="${item.url}" alt="">
+           <div class="resize-handle"></div>
+           <button class="delete-btn" type="button" title="Borrar">×</button>`;
       applyTransform(el, item);
-      setupDrag(el, item);
-      setupResize(el.querySelector(".resize-handle"), el, item);
-      el.addEventListener("click", e => { e.stopPropagation(); select(item.id); });
+      setupDrag(el, item, pending);
+      setupResize(el.querySelector(".resize-handle"), el, item, pending);
+      el.addEventListener("click", e => { e.stopPropagation(); select(item.id, pending); });
       el.querySelector(".delete-btn").addEventListener("click", e => {
         e.stopPropagation();
-        api("DELETE", `/api/items/${item.id}?token=${token}`);
+        const base = pending ? "/api/pending" : "/api/items";
+        api("DELETE", `${base}/${item.id}?token=${token}`);
+        if (selectedId === item.id) selectedId = null;
       });
       stage.appendChild(el);
       return el;
@@ -145,9 +182,10 @@
       el.style.transform = `rotate(${item.rotation || 0}deg)`;
     }
 
-    function select(id) {
+    function select(id, pending) {
       selectedId = id;
-      rendered.forEach((el, iid) => el.classList.toggle("selected", iid === id));
+      rendered.forEach((el, iid) => el.classList.toggle("selected", !pending && iid === id));
+      pendingRendered.forEach((el, iid) => el.classList.toggle("selected", pending && iid === id));
     }
 
     stage.addEventListener("click", () => select(null));
@@ -156,12 +194,14 @@
     document.addEventListener("keydown", e => {
       if ((e.key === "Delete" || e.key === "Backspace") && selectedId && e.target === document.body) {
         e.preventDefault();
-        api("DELETE", `/api/items/${selectedId}?token=${token}`);
+        const inPending = pendingRendered.has(selectedId);
+        const base = inPending ? "/api/pending" : "/api/items";
+        api("DELETE", `${base}/${selectedId}?token=${token}`);
         selectedId = null;
       }
     });
 
-    function setupDrag(el, item) {
+    function setupDrag(el, item, pending) {
       let dragging = false, startX, startY, origX, origY;
       el.addEventListener("pointerdown", e => {
         if (e.target.classList.contains("resize-handle") || e.target.classList.contains("delete-btn")) return;
@@ -169,7 +209,7 @@
         el.setPointerCapture(e.pointerId);
         startX = e.clientX; startY = e.clientY;
         origX = item.x; origY = item.y;
-        select(item.id);
+        select(item.id, pending);
       });
       el.addEventListener("pointermove", e => {
         if (!dragging) return;
@@ -180,11 +220,12 @@
       el.addEventListener("pointerup", () => {
         if (!dragging) return;
         dragging = false;
-        api("PUT", `/api/items/${item.id}`, { x: item.x, y: item.y });
+        const base = pending ? "/api/pending" : "/api/items";
+        api("PUT", `${base}/${item.id}`, { x: item.x, y: item.y });
       });
     }
 
-    function setupResize(handle, el, item) {
+    function setupResize(handle, el, item, pending) {
       let resizing = false, startX, startY, origW, origH;
       handle.addEventListener("pointerdown", e => {
         e.stopPropagation();
@@ -202,21 +243,47 @@
       handle.addEventListener("pointerup", () => {
         if (!resizing) return;
         resizing = false;
-        api("PUT", `/api/items/${item.id}`, { width: item.width, height: item.height });
+        const base = pending ? "/api/pending" : "/api/items";
+        api("PUT", `${base}/${item.id}`, { width: item.width, height: item.height });
       });
     }
 
+    function updateEmptyState() {
+      const hasAny = rendered.size > 0 || pendingRendered.size > 0;
+      stageEmpty.style.display = hasAny ? "none" : "flex";
+    }
+
     function sync(items) {
-      stageEmpty.style.display = items.length ? "none" : "flex";
       const ids = new Set(items.map(i => i.id));
       for (const [id, el] of rendered) {
         if (!ids.has(id)) { el.remove(); rendered.delete(id); if (selectedId === id) selectedId = null; }
       }
       items.forEach(item => {
         let el = rendered.get(item.id);
-        if (!el) { el = createEl(item); rendered.set(item.id, el); }
+        if (!el) {
+          if (pendingRendered.has(item.id)) {
+            pendingRendered.get(item.id).remove();
+            pendingRendered.delete(item.id);
+          }
+          el = createEl(item);
+          rendered.set(item.id, el);
+        } else applyTransform(el, item);
+      });
+      updateEmptyState();
+    }
+
+    function syncPending(items) {
+      const ids = new Set(items.map(i => i.id));
+      for (const [id, el] of pendingRendered) {
+        if (!ids.has(id)) { el.remove(); pendingRendered.delete(id); if (selectedId === id) selectedId = null; }
+      }
+      items.forEach(item => {
+        if (rendered.has(item.id)) return;
+        let el = pendingRendered.get(item.id);
+        if (!el) { el = createEl(item, { pending: true }); pendingRendered.set(item.id, el); }
         else applyTransform(el, item);
       });
+      updateEmptyState();
     }
 
     document.getElementById("file-input").addEventListener("change", async e => {
